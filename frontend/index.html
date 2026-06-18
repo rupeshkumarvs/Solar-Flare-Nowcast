@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Solar Flare Nowcast — Aditya-L1 / GOES</title>
+
+  <!-- Inline SVG favicon: stylised sun / flare, no external dependency -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='7' fill='%23ffb300'/%3E%3Cg stroke='%23ff7a00' stroke-width='2.2' stroke-linecap='round'%3E%3Cline x1='16' y1='2' x2='16' y2='7'/%3E%3Cline x1='16' y1='25' x2='16' y2='30'/%3E%3Cline x1='2' y1='16' x2='7' y2='16'/%3E%3Cline x1='25' y1='16' x2='30' y2='16'/%3E%3Cline x1='6' y1='6' x2='9.5' y2='9.5'/%3E%3Cline x1='22.5' y1='22.5' x2='26' y2='26'/%3E%3Cline x1='26' y1='6' x2='22.5' y2='9.5'/%3E%3Cline x1='9.5' y1='22.5' x2='6' y2='26'/%3E%3C/g%3E%3C/svg%3E" />
+
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <!-- topojson-client: converts the real world-atlas land TopoJSON to drawable paths.
+       If this CDN is unreachable the map degrades gracefully to a graticule. -->
+  <script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
+  <!-- satellite.js: client-side SGP4 so every satellite is propagated every second
+       in the browser for smooth, continuous, fully-dynamic motion (real TLEs). -->
+  <script src="https://cdn.jsdelivr.net/npm/satellite.js@5.0.0/dist/satellite.min.js"></script>
+</head>
+<body>
+  <!-- CSS-only corona + starfield backdrop (very low opacity, behind everything) -->
+  <div class="space-bg" aria-hidden="true"><div class="corona"></div><div class="stars"></div></div>
+
+  <!-- screen-edge red pulse layer, toggled on red alerts -->
+  <div id="screen-pulse" class="screen-pulse" aria-hidden="true"></div>
+
+  <!-- ───────────── TOP BAR ───────────── -->
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-icon" viewBox="0 0 32 32" aria-hidden="true">
+        <circle cx="16" cy="16" r="6.5" fill="#ffb300" />
+        <g stroke="#ff7a00" stroke-width="2.2" stroke-linecap="round">
+          <line x1="16" y1="2.5" x2="16" y2="7" /><line x1="16" y1="25" x2="16" y2="29.5" />
+          <line x1="2.5" y1="16" x2="7" y2="16" /><line x1="25" y1="16" x2="29.5" y2="16" />
+          <line x1="6.3" y1="6.3" x2="9.6" y2="9.6" /><line x1="22.4" y1="22.4" x2="25.7" y2="25.7" />
+          <line x1="25.7" y1="6.3" x2="22.4" y2="9.6" /><line x1="9.6" y1="22.4" x2="6.3" y2="25.7" />
+        </g>
+      </svg>
+      <div class="brand-text">
+        <h1>Solar Flare Nowcast <span class="dim">— Aditya-L1 / GOES</span></h1>
+        <p class="subtitle">Live nowcasting + forecasting using combined soft + hard X-ray data</p>
+      </div>
+    </div>
+
+    <!-- HERO space-weather status -->
+    <div class="hero-status" id="hero-status">
+      <div class="hero-left">
+        <span class="hero-label">SPACE WEATHER STATUS</span>
+        <span id="hero-word" class="hero-word">—</span>
+      </div>
+      <div class="hero-class">
+        <span class="class-badge-label">CURRENT CLASS</span>
+        <span id="class-badge" class="class-badge cls-na">—</span>
+      </div>
+    </div>
+
+    <div class="topbar-right">
+      <div id="status-pill" class="status-pill connecting">
+        <span class="dot"></span>
+        <span id="status-text">CONNECTING…</span>
+        <span id="status-time" class="status-time"></span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ───────────── TOOLBAR: view tabs + replay control ───────────── -->
+  <div class="toolbar">
+    <div class="tabs" role="tablist">
+      <button class="tab active" id="tab-live" data-view="live">◉ LIVE DASHBOARD</button>
+      <button class="tab" id="tab-perf" data-view="performance">▣ MODEL PERFORMANCE</button>
+      <button class="tab" id="tab-track" data-view="tracking">🛰 SATELLITE TRACKING</button>
+    </div>
+    <div class="replay-control">
+      <span class="replay-label">REPLAY REAL FLARE</span>
+      <select id="replay-select" class="replay-select">
+        <option value="">— select a recorded event —</option>
+      </select>
+      <button id="replay-play" class="replay-btn" disabled>▶ PLAY</button>
+      <button id="replay-exit" class="replay-btn exit hidden">■ EXIT REPLAY</button>
+    </div>
+  </div>
+
+  <!-- ───────────── ALERT BANNER (hidden unless elevated) ───────────── -->
+  <div id="alert-banner" class="alert-banner hidden">
+    <svg class="alert-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 2 L22 20 H2 Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+      <line x1="12" y1="9" x2="12" y2="14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      <circle cx="12" cy="17.5" r="1.2" fill="currentColor"/>
+    </svg>
+    <span id="alert-text">ELEVATED FLARE RISK</span>
+  </div>
+
+  <!-- ───────────── REPLAY BANNER (hidden unless replaying) ───────────── -->
+  <div id="replay-banner" class="replay-banner hidden">
+    <span class="replay-pill">▶ REPLAY</span>
+    <span id="replay-banner-label">—</span>
+    <span class="replay-sep">·</span>
+    <span id="replay-progress" class="replay-progress">frame 0 / 0</span>
+    <span class="replay-sep">·</span>
+    <span id="replay-lead" class="replay-lead">lead —</span>
+    <span class="replay-note">Real recorded GOES data, played through the live model</span>
+  </div>
+
+  <!-- ═════════════ VIEW: LIVE DASHBOARD ═════════════ -->
+  <main class="grid" id="view-live">
+
+    <!-- PANEL 1 — Light Curve -->
+    <section class="panel panel-chart">
+      <div class="panel-head">
+        <h2>Live X-ray Light Curve</h2>
+        <span class="panel-sub">GOES long-band (0.1–0.8nm) + short-band (0.05–0.4nm) · last 6h · log scale</span>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="flux-chart"></canvas>
+      </div>
+    </section>
+
+    <!-- PANEL 2 — Forecast Gauges + Aditya precursor -->
+    <section class="panel panel-gauges">
+      <div class="panel-head">
+        <h2>M+ Flare Forecast</h2>
+        <span class="panel-sub">Probability of ≥M-class flare</span>
+      </div>
+      <div id="gauges" class="gauges">
+        <div class="gauge" data-h="10">
+          <svg viewBox="0 0 120 120"><circle class="g-track" cx="60" cy="60" r="50"/><circle class="g-fill" cx="60" cy="60" r="50"/></svg>
+          <div class="gauge-center"><span class="g-val">—</span><span class="g-h">10 min</span></div>
+        </div>
+        <div class="gauge" data-h="30">
+          <svg viewBox="0 0 120 120"><circle class="g-track" cx="60" cy="60" r="50"/><circle class="g-fill" cx="60" cy="60" r="50"/></svg>
+          <div class="gauge-center"><span class="g-val">—</span><span class="g-h">30 min</span></div>
+        </div>
+        <div class="gauge" data-h="60">
+          <svg viewBox="0 0 120 120"><circle class="g-track" cx="60" cy="60" r="50"/><circle class="g-fill" cx="60" cy="60" r="50"/></svg>
+          <div class="gauge-center"><span class="g-val">—</span><span class="g-h">60 min</span></div>
+        </div>
+      </div>
+      <div class="trend-row">
+        <span class="trend-label">TREND</span>
+        <span id="trend-indicator" class="trend-indicator">—</span>
+      </div>
+      <div id="forecast-status" class="forecast-status">Awaiting forecast…</div>
+
+      <!-- NOAA SWPC's OWN official forecast, shown next to ours for context -->
+      <div class="noaa-compare" id="noaa-compare">
+        <span class="noaa-label">NOAA SWPC official · next 24h</span>
+        <span class="noaa-vals"><b id="noaa-m">—</b> M-class · <b id="noaa-x">—</b> X-class</span>
+      </div>
+
+      <!-- Aditya-L1 Hard X-ray precursor sub-panel -->
+      <div class="precursor" id="precursor">
+        <div class="precursor-head">
+          <span class="precursor-title">HARD X-RAY PRECURSOR SIGNAL</span>
+          <span id="precursor-state" class="precursor-state pending">Awaiting Aditya-L1 via PRADAN</span>
+        </div>
+        <div class="precursor-bar"><div id="precursor-fill" class="precursor-fill"></div></div>
+        <div class="precursor-foot">
+          <span class="dim">hard/soft ratio</span>
+          <span id="precursor-val" class="precursor-val">—</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- PANEL 3 — Live Space Weather Context (all keyless NOAA SWPC feeds) -->
+    <section class="panel panel-context">
+      <div class="panel-head">
+        <h2>Live Space Weather Context</h2>
+        <span class="panel-sub">NOAA SWPC · proton flux · solar wind · Kp · F10.7 · active regions · refreshes every 3 min</span>
+      </div>
+      <div class="ctx-strip">
+        <div class="sw-card" id="sw-proton">
+          <span class="sw-label">RADIATION STORM</span>
+          <span class="sw-val" id="sw-proton-val">—</span>
+          <span class="sw-sub" id="sw-proton-sub">≥10 MeV proton flux</span>
+        </div>
+        <div class="sw-card" id="sw-wind">
+          <span class="sw-label">SOLAR WIND</span>
+          <span class="sw-val" id="sw-wind-val">—</span>
+          <span class="sw-sub" id="sw-wind-sub">speed · Bz</span>
+        </div>
+        <div class="sw-card" id="sw-kp">
+          <span class="sw-label">GEOMAGNETIC Kp</span>
+          <span class="sw-val" id="sw-kp-val">—</span>
+          <span class="sw-sub" id="sw-kp-sub">planetary index</span>
+        </div>
+        <div class="sw-card" id="sw-f107">
+          <span class="sw-label">F10.7 RADIO FLUX</span>
+          <span class="sw-val" id="sw-f107-val">—</span>
+          <span class="sw-sub">solar activity level (sfu)</span>
+        </div>
+        <div class="sw-card" id="sw-regions">
+          <span class="sw-label">ACTIVE REGIONS</span>
+          <span class="sw-val" id="sw-regions-val">—</span>
+          <span class="sw-sub" id="sw-regions-sub">sunspot groups</span>
+        </div>
+        <div class="sw-card sw-card-noaa" id="sw-noaa">
+          <span class="sw-label">NOAA FLARE FORECAST</span>
+          <span class="sw-val" id="sw-noaa-val">—</span>
+          <span class="sw-sub" id="sw-noaa-sub">official · next 24h</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- PANEL 4 — Catalog -->
+    <section class="panel panel-catalog">
+      <div class="panel-head">
+        <h2>Detected Flare Catalog</h2>
+        <span class="panel-sub">Auto-cataloged from live GOES feed · refreshes every 60s</span>
+      </div>
+      <div class="table-wrap">
+        <table id="catalog-table">
+          <thead>
+            <tr>
+              <th>Start (UTC)</th><th>Peak (UTC)</th><th>End (UTC)</th>
+              <th>Class</th><th>Peak Flux (W/m²)</th><th>Duration</th>
+            </tr>
+          </thead>
+          <tbody id="catalog-body">
+            <tr><td colspan="6" class="table-empty">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- ═════════════ VIEW: MODEL PERFORMANCE ═════════════ -->
+  <main class="perf-view hidden" id="view-performance">
+    <div class="perf-note" id="perf-note">
+      Loading real held-out evaluation metrics…
+    </div>
+
+    <div class="perf-cards" id="perf-cards"><!-- per-horizon cards injected --></div>
+
+    <div class="perf-charts">
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Lead-Time Distribution</h2>
+          <span class="panel-sub">Minutes the model fired before each real M+ flare peak · held-out test set</span>
+        </div>
+        <div class="perf-horizon-toggle" id="lead-toggle">
+          <button class="htog active" data-h="10">10 min</button>
+          <button class="htog" data-h="30">30 min</button>
+          <button class="htog" data-h="60">60 min</button>
+        </div>
+        <div class="perf-chart-wrap"><canvas id="lead-hist"></canvas></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Skill vs Persistence Baseline</h2>
+          <span class="panel-sub">TSS &amp; HSS — model vs naïve persistence, per horizon</span>
+        </div>
+        <div class="perf-chart-wrap"><canvas id="baseline-bar"></canvas></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Reliability (Calibration) Curve</h2>
+          <span class="panel-sub">Predicted probability vs observed frequency · selected horizon</span>
+        </div>
+        <div class="perf-chart-wrap"><canvas id="calib-curve"></canvas></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Confusion Matrix</h2>
+          <span class="panel-sub">Held-out test set · selected horizon · alert threshold 0.5</span>
+        </div>
+        <div class="confusion" id="confusion"><!-- injected --></div>
+      </section>
+    </div>
+  </main>
+
+  <!-- ═════════════ VIEW: SATELLITE TRACKING ═════════════ -->
+  <main class="track-view hidden" id="view-tracking">
+    <div class="track-readout" id="track-readout">
+      <div class="ro-item"><span class="ro-k">UTC</span><span class="ro-v" id="ro-utc">—</span></div>
+      <div class="ro-item"><span class="ro-k">SUB-SOLAR POINT</span><span class="ro-v" id="ro-subsolar">—</span></div>
+      <div class="ro-item"><span class="ro-k">SATELLITES TRACKED</span><span class="ro-v" id="ro-tracked">—</span></div>
+      <div class="ro-item"><span class="ro-k">SOLAR WIND L1→EARTH</span><span class="ro-v" id="ro-transit">—</span></div>
+      <div class="ro-item"><span class="ro-k">POSITION SOURCE</span><span class="ro-v" id="ro-source">CelesTrak TLE · SGP4 · live</span></div>
+    </div>
+
+    <div class="track-grid">
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Live Satellite Ground Tracks</h2>
+          <span class="panel-sub">GOES + SDO from real TLEs (SGP4) · live day/night terminator · GEO coverage footprints</span>
+        </div>
+        <div class="map-wrap"><canvas id="world-map"></canvas></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Sun–Earth L1 System</h2>
+          <span class="panel-sub">Deep-space monitors at L1 · solar-wind transit time from live DSCOVR speed</span>
+        </div>
+        <div class="map-wrap"><canvas id="l1-map"></canvas></div>
+      </section>
+    </div>
+
+    <div class="sat-legend" id="sat-legend"></div>
+  </main>
+
+  <!-- PANEL 5 — Data Source Status + provenance -->
+  <footer class="footer">
+    <div class="source-chips">
+      <span class="chip" id="chip-goes"><span class="chip-dot"></span>GOES / NOAA: <b>…</b></span>
+      <span class="chip" id="chip-donki"><span class="chip-dot"></span>NASA DONKI: <b>…</b></span>
+      <span class="chip" id="chip-aditya"><span class="chip-dot"></span>Aditya-L1 SoLEXS/HEL1OS: <b>…</b></span>
+    </div>
+    <span class="footer-note" id="provenance">
+      Live: NOAA SWPC GOES-16/18 · Forecast: LightGBM on 2023–2024 GOES XRS · Aditya-L1 SoLEXS+HEL1OS via ISSDC PRADAN
+    </span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+# Exact, verified versions — frozen from a working run (Python 3.12).
+# Use this for a reproducible install on a fresh machine / judge's laptop:
+#   pip install -r requirements.lock.txt
+# (requirements.txt holds the looser >= ranges for normal development.)
+astropy==7.2.0
+beautifulsoup4==4.14.3
+fastapi==0.136.3
+httpx==0.28.1
+joblib==1.5.3
+lightgbm==4.6.0
+netCDF4==1.7.4
+numpy==1.26.4
+pandas==3.0.2
+pyarrow==24.0.0
+pydantic==2.13.4
+python-dotenv==1.2.2
+scikit-learn==1.8.0
+scipy==1.17.1
+sgp4==2.25
+starlette==0.52.1
+truststore==0.10.4
+uvicorn==0.49.0
+websockets==16.0
+xarray==2026.4.0

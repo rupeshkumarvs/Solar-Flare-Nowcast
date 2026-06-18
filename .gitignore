@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+
+# IDE
+.vscode/
+.idea/
+
+# Runtime artifacts (regenerated at run time — not source)
+backend/data/flare_catalog.db
+backend/data/temp_*/
+backend/model/cdp_profile/
+backend/model/*.log
+*.log
