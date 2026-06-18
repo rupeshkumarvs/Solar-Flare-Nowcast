@@ -203,3 +203,4 @@ The architecture is fusion-ready today. To activate it with real ISSDC PRADAN da
 - The poller retries every 60s; a transient SSL/network error at startup will not stop boot.
 - TLS uses the **OS trust store** (`truststore`) so HTTPS to NOAA/NASA works on networks
   with TLS interception — without ever disabling certificate verification.
+  BUILT BY @vsrupeshkumar
